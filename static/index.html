@@ -1,1 +1,140 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>车辆召回跟踪</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:0 20px}pre{background:#f3f5f7;padding:16px;overflow:auto}button{padding:8px 14px}</style><h1>车辆安全召回与修复跟踪</h1><p>召回范围按版本发布，维修记录需结合车辆流转、零件库存、跨境许可和监管复核。</p><button onclick="loadState()">刷新状态</button><pre id="state">加载中...</pre><script>async function loadState(){state.textContent=JSON.stringify(await (await fetch('/api/state')).json(),null,2)}loadState()</script></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>召回对账台</title>
+<style>
+  :root{--bd:#d9dee5;--bg:#f6f8fa;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--accent:#0969da}
+  *{box-sizing:border-box}
+  body{font:14px/1.5 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;max-width:1280px;margin:24px auto;padding:0 20px;color:#1f2328}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:#57606a;margin:0 0 16px}
+  button{padding:6px 14px;border:1px solid var(--bd);border-radius:6px;background:#fff;cursor:pointer}
+  button:hover{background:var(--bg)}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 16px}
+  .tab{padding:8px 14px;border:1px solid var(--bd);border-radius:8px;background:#fff;cursor:pointer;text-align:left}
+  .tab.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(9,105,218,.15)}
+  .tab b{display:block}
+  .tab small{color:#57606a}
+  .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .card{border:1px solid var(--bd);border-radius:8px;padding:10px 16px;background:#fff;min-width:130px}
+  .card .n{font-size:22px;font-weight:700}
+  .card .l{color:#57606a;font-size:12px}
+  .reason{background:#fff8e6;border:1px solid #e3b341;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px}
+  .reason b{color:var(--warn)}
+  h2{font-size:15px;margin:22px 0 8px}
+  table{border-collapse:collapse;width:100%;background:#fff;font-size:13px}
+  th,td{border:1px solid var(--bd);padding:6px 9px;text-align:left;vertical-align:top}
+  th{background:var(--bg);white-space:nowrap}
+  .tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
+  .in{background:#dafbe1;color:var(--ok)}
+  .out{background:#eee;color:#57606a}
+  .todo{background:#fff1e5;color:#bc4c00}
+  .ok{background:#dafbe1;color:var(--ok)}
+  .bad{background:#ffebe9;color:var(--bad)}
+  .bo{background:#ffebe9;color:var(--bad);border-radius:4px;padding:1px 6px;font-size:12px}
+  .muted{color:#8c959f}
+  .checks td.ok2{color:var(--ok)}
+  .checks td.bad2{color:var(--bad);font-weight:600}
+  pre{white-space:pre-wrap;word-break:break-all}
+  .hint{font-size:12px;color:#57606a}
+</style>
+</head>
+<body>
+<h1>车辆召回对账台</h1>
+<p class="sub">召回范围 · 车辆流转 · 网点库存 · 维修记录 · 监管上报 五账联查；范围或所在国变化即重算，历史通知与已确认维修保留可查。</p>
+<button onclick="load()">刷新对账结果</button>
+<div id="root" class="tabs"><span class="muted">加载中…</span></div>
+
+<script>
+let data=[], current=null;
+
+async function load(){
+  data=(await (await fetch('/api/reconciliation')).json()).recalls||[];
+  if(!data.length){root.innerHTML='<p class="muted">当前没有已发布召回。</p>';return;}
+  if(!data.find(r=>r.recall_id===current)) current=data[0].recall_id;
+  renderTabs(); render(data.find(r=>r.recall_id===current));
+}
+
+function renderTabs(){
+  root.className='tabs';
+  root.innerHTML=data.map(r=>`<div class="tab ${r.recall_id===current?'active':''}" onclick="current=${r.recall_id};renderTabs();render(data.find(x=>x.recall_id===current))">
+    <b>${r.campaign_code}</b><small>${r.title} · v${r.scope_version} · 待办 ${r.todo_count} · 欠件 ${r.backorder_count}</small></div>`).join('');
+}
+
+function tag(text, cls){return `<span class="tag ${cls}">${text}</span>`;}
+
+function render(r){
+  const last=r.last_recompute||{};
+  let html=`<div class="cards">
+    <div class="card"><div class="n">v${r.scope_version}</div><div class="l">当前范围版本</div></div>
+    <div class="card"><div class="n">${r.affected_count}</div><div class="l">当前受影响车辆</div></div>
+    <div class="card"><div class="n">${r.todo_count}</div><div class="l">待办维修</div></div>
+    <div class="card"><div class="n">${r.confirmed_count}</div><div class="l">已确认维修</div></div>
+    <div class="card"><div class="n" style="color:${r.backorder_count?'#cf222e':'inherit'}">${r.backorder_count}</div><div class="l">欠件挂起提交</div></div>
+    <div class="card"><div class="n">v${r.remedy_version}</div><div class="l">当前维修方案</div></div>
+  </div>
+  <div class="reason"><b>最近重算原因：</b>${last.reason||'—'}
+    <br><span class="hint">触发：${last.trigger||'—'} ｜ 重算版本：v${last.scope_version||'—'} ｜ 当时受影响：${last.affected_count??'—'} 辆 ｜ 操作人：${last.actor||'—'} ｜ 时间：${last.created_at||'—'}</span></div>`;
+
+  html+=`<h2>按车辆对账（当前范围版本 / 待办 / 欠件 / 重算原因）</h2>
+  <table><thead><tr><th>VIN</th><th>车型/年款</th><th>所在国</th><th>车主</th><th>范围</th><th>范围版本</th><th>待办</th>
+    <th>维修记录</th><th>欠件挂起（流水号/重试）</th><th>通知版本</th><th>重算原因</th></tr></thead><tbody>`;
+  for(const v of r.vehicles){
+    const repairs=(v.repair_history||[]).map(x=>`#${x.id} ${x.status}@${x.dealer_code}(v${x.remedy_version})`).join('<br>')||'<span class="muted">无</span>';
+    const bo=v.backorder?`<span class="bo">${v.backorder.idempotency_key} ×${v.backorder.attempts}</span>`:'<span class="muted">—</span>';
+    const notes=(v.notifications||[]).map(n=>`v${n.scope_version}:${n.status}`).join(', ')||'<span class="muted">—</span>';
+    html+=`<tr>
+      <td>${v.vin}</td><td>${v.model}/${v.model_year}</td><td>${v.country}<span class="muted"> (原产 ${v.origin_country})</span></td><td>${v.owner_name||''}</td>
+      <td>${v.in_scope?tag('在范围内','in'):tag('已出范围','out')}</td>
+      <td>${v.scope_version?('v'+v.scope_version):'<span class="muted">未归属</span>'}</td>
+      <td>${v.todo?tag('待办','todo'):'<span class="muted">否</span>'}</td>
+      <td>${repairs}</td><td>${bo}</td><td>${notes}</td>
+      <td class="hint">${v.recompute_reason||'—'}</td></tr>`;
+  }
+  html+='</tbody></table>';
+
+  html+=`<h2>按网点对账（库存 / 需求 / 欠件 / 台账）</h2>
+  <table><thead><tr><th>网点</th><th>国家</th><th>方案版本</th><th>可用库存</th><th>本国待办需求</th><th>预计缺口</th>
+    <th>欠件提交（流水号/次数）</th><th>台账结余</th><th>重算原因</th></tr></thead><tbody>`;
+  if(!r.dealers.length) html+='<tr><td colspan="9" class="muted">该召回暂无网点备件记录</td></tr>';
+  for(const d of r.dealers){
+    const bos=(d.backorders||[]).map(b=>`<span class="bo">${b.vin} ${b.idempotency_key} ×${b.attempts}</span>`).join('<br>')||'<span class="muted">—</span>';
+    html+=`<tr><td><b>${d.dealer_code}</b> ${d.dealer_name}</td><td>${d.country}</td><td>v${d.remedy_version}</td>
+      <td><b>${d.available}</b></td><td>${d.demand_in_country}</td>
+      <td style="color:${d.projected_gap?'#cf222e':'inherit'};font-weight:${d.projected_gap?'700':'400'}">${d.projected_gap}</td>
+      <td>${bos}</td><td>${d.ledger_total}</td><td class="hint">${d.recompute_reason||'—'}</td></tr>`;
+  }
+  html+='</tbody></table>';
+
+  html+=`<h2>对账校验</h2><table class="checks"><tbody>`;
+  for(const c of r.checks){
+    const detail=typeof c.detail==='string'?c.detail:JSON.stringify(c.detail);
+    html+=`<tr><td>${c.ok?tag('通过','ok'):tag('异常','bad')}</td><td>${c.name}</td><td class="hint">${detail}</td></tr>`;
+  }
+  html+='</tbody></table>';
+
+  html+=`<h2>监管上报（每个范围版本一条，重算后重新排队）</h2>
+  <table><thead><tr><th>范围版本</th><th>状态</th><th>受影响数</th><th>原因</th><th>更新时间</th></tr></thead><tbody>`;
+  for(const p of r.reports){
+    html+=`<tr><td>v${p.scope_version}</td><td>${tag(p.status,p.status==='queued'?'todo':'in')}</td>
+      <td>${p.payload.affected_count}</td><td class="hint">${p.reason||''}</td><td class="hint">${p.updated_at||p.created_at}</td></tr>`;
+  }
+  html+='</tbody></table>';
+
+  html+=`<h2>重算流水（最近 ${r.recompute_runs.length} 次）</h2>
+  <table><thead><tr><th>时间</th><th>范围版本</th><th>触发</th><th>原因</th><th>受影响数</th><th>操作人</th></tr></thead><tbody>`;
+  for(const x of r.recompute_runs){
+    html+=`<tr><td class="hint">${x.created_at}</td><td>v${x.scope_version}</td><td>${x.trigger}</td>
+      <td class="hint">${x.reason}</td><td>${x.affected_count}</td><td>${x.actor}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  root.insertAdjacentHTML('afterend','');
+  let box=document.getElementById('detail');
+  if(!box){box=document.createElement('div');box.id='detail';root.after(box);}
+  box.innerHTML=html;
+}
+load();
+</script>
+</body>
+</html>
