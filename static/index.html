@@ -1,1 +1,280 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>车辆召回跟踪</title><style>body{font:16px system-ui;max-width:1100px;margin:32px auto;padding:0 20px}pre{background:#f3f5f7;padding:16px;overflow:auto}button{padding:8px 14px}</style><h1>车辆安全召回与修复跟踪</h1><p>召回范围按版本发布，维修记录需结合车辆流转、零件库存、跨境许可和监管复核。</p><button onclick="loadState()">刷新状态</button><pre id="state">加载中...</pre><script>async function loadState(){state.textContent=JSON.stringify(await (await fetch('/api/state')).json(),null,2)}loadState()</script></html>
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>车辆召回对账平台</title>
+<style>
+  :root{--bg:#f5f7fa;--card:#fff;--ink:#1f2937;--mut:#6b7280;--line:#e5e7eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--accent:#2563eb;}
+  *{box-sizing:border-box}
+  body{font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+  header{background:#111827;color:#fff;padding:18px 28px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:20px;margin:0}
+  header .sub{color:#9ca3af;font-size:13px}
+  main{max-width:1280px;margin:0 auto;padding:24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:20px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .card h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .card h2 .tag{font-size:12px;background:#eef2ff;color:#4338ca;padding:2px 8px;border-radius:999px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{background:#f9fafb;color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  tr:last-child td{border-bottom:none}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.ok{background:#dcfce7;color:var(--ok)}
+  .pill.warn{background:#fef3c7;color:var(--warn)}
+  .pill.bad{background:#fee2e2;color:var(--bad)}
+  .pill.mut{background:#f3f4f6;color:var(--mut)}
+  .pill.accent{background:#dbeafe;color:var(--accent)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+  .mut{color:var(--mut)}
+  .bad{color:var(--bad)}
+  .ok{color:var(--ok)}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  select,button{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover{background:#1d4ed8}
+  button:hover{background:#f3f4f6}
+  .stat{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:6px}
+  .stat .item{background:#f9fafb;border:1px solid var(--line);border-radius:8px;padding:10px 16px}
+  .stat .num{font-size:22px;font-weight:700}
+  .stat .lbl{font-size:12px;color:var(--mut)}
+  .reason{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #toast{position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+  #toast.show{opacity:1}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>车辆安全召回 · 对账平台</h1>
+  <span class="sub">召回范围 / 车辆流转 / 网点库存 / 维修记录 / 监管上报 统一对账</span>
+</header>
+<main>
+  <div class="card">
+    <div class="toolbar">
+      <label class="mut">召回活动</label>
+      <select id="recallSelect"></select>
+      <button class="primary" onclick="loadAll()">刷新对账</button>
+      <span style="flex:1"></span>
+      <button onclick="doChangeScope()">调整范围</button>
+      <button onclick="doTransfer()">车辆转手</button>
+      <button onclick="doAddParts()">入库备件</button>
+    </div>
+    <div class="stat" id="stat"></div>
+  </div>
+
+  <div class="card">
+    <h2>车辆对账 <span class="tag" id="vehCount"></span></h2>
+    <table id="vehTable">
+      <thead><tr><th>VIN</th><th>车型</th><th>年份</th><th>所在国</th><th>原籍国</th><th>在范围内</th><th>当前范围版本</th><th>已通知版本</th><th>维修状态</th><th>待办</th><th>欠件</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>网点库存对账 <span class="tag" id="dlrCount"></span></h2>
+    <table id="dlrTable">
+      <thead><tr><th>网点</th><th>国家</th><th>状态</th><th>备件（可用）</th><th>待办数</th><th>欠件数</th><th>欠件车辆</th><th>当前范围版本</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>重算原因 <span class="tag">recalculations</span></h2>
+      <table id="recalcTable">
+        <thead><tr><th>时间</th><th>触发</th><th>范围版本</th><th>车辆</th><th>原因</th><th>受影响数</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>监管上报 <span class="tag">regulatory_reports</span></h2>
+      <table id="reportTable">
+        <thead><tr><th>范围版本</th><th>受影响数</th><th>状态</th><th>生成时间</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>范围版本历史 <span class="tag">scope_changes</span></h2>
+    <table id="scopeTable">
+      <thead><tr><th>版本</th><th>范围（车型 / 年份 / VIN 前缀 / 国家）</th><th>调整人</th><th>时间</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let state = null, recon = null;
+
+async function api(path, opts={}){
+  const res = await fetch(path, {headers:{'Content-Type':'application/json',...(opts.headers||{})}, ...opts});
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || ('HTTP '+res.status));
+  return data;
+}
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2600); }
+function pill(text, cls){ return `<span class="pill ${cls}">${text}</span>`; }
+function esc(s){ return String(s??'').replace(/[&<>]/g,c=>({'&':'&','<':'<','>':'>'}[c])); }
+
+async function loadState(){
+  state = await api('/api/state');
+  const sel = $('recallSelect');
+  sel.innerHTML = '';
+  state.recalls.forEach(r=>{
+    const o=document.createElement('option'); o.value=r.id;
+    o.textContent = `${r.campaign_code} · ${r.title}（范围 v${r.scope_version}）`;
+    sel.appendChild(o);
+  });
+  if(state.recalls.length) await loadAll();
+}
+
+async function loadAll(){
+  const id = $('recallSelect').value;
+  if(!id) return;
+  recon = await api(`/api/recalls/${id}/reconciliation`);
+  renderStat(); renderVehicles(); renderDealers(); renderRecalcs(); renderReports(); renderScopes();
+}
+
+function renderStat(){
+  const r = recon.recall;
+  const inScope = recon.vehicles.filter(v=>v.in_scope).length;
+  const open = recon.vehicles.filter(v=>v.todo_status==='open').length;
+  const done = recon.vehicles.filter(v=>v.todo_status==='done').length;
+  const shortage = recon.vehicles.filter(v=>v.shortage).length;
+  $('stat').innerHTML = `
+    <div class="item"><div class="num">${r.scope_version}</div><div class="lbl">当前范围版本</div></div>
+    <div class="item"><div class="num">${inScope}</div><div class="lbl">在范围内车辆</div></div>
+    <div class="item"><div class="num">${open}</div><div class="lbl">待办（未维修）</div></div>
+    <div class="item"><div class="num">${done}</div><div class="lbl">已完成维修</div></div>
+    <div class="item"><div class="num" style="color:var(--bad)">${shortage}</div><div class="lbl">欠件车辆</div></div>
+    <div class="item"><div class="num">${r.state}</div><div class="lbl">召回状态</div></div>`;
+}
+
+function renderVehicles(){
+  $('vehCount').textContent = `${recon.vehicles.length} 台`;
+  $('vehTable').querySelector('tbody').innerHTML = recon.vehicles.map(v=>{
+    const scopeCell = v.in_scope
+      ? (v.current_scope_version ? pill('v'+v.current_scope_version,'accent') : pill('待通知','mut'))
+      : pill('不在范围','mut');
+    const repairCell = v.repair_status==='confirmed' ? pill('已确认','ok')
+      : v.repair_status==='reported' ? pill('已报告','warn')
+      : v.repair_status==='flagged' ? pill('已标记','bad') : pill('无','mut');
+    const todoCell = v.todo_status==='done' ? pill('已完成','ok')
+      : v.todo_status==='open' ? pill('待办','warn')
+      : v.todo_status==='cancelled' ? pill('已取消','mut') : pill('—','mut');
+    const shortCell = v.shortage ? pill('欠件','bad') : (v.in_scope && v.todo_status==='open' ? pill('有件','ok') : '—');
+    return `<tr>
+      <td class="mono">${esc(v.vin)}</td><td>${esc(v.model)}</td><td>${v.model_year}</td>
+      <td>${esc(v.country)}</td><td class="mut">${esc(v.origin_country)}</td>
+      <td>${v.in_scope?pill('是','ok'):pill('否','mut')}</td>
+      <td>${scopeCell}</td>
+      <td class="mono mut">${v.notified_versions.length?v.notified_versions.map(n=>'v'+n).join(', '):'—'}</td>
+      <td>${repairCell}</td><td>${todoCell}</td><td>${shortCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDealers(){
+  $('dlrCount').textContent = `${recon.dealers.length} 个网点`;
+  const recall = recon.recall;
+  $('dlrTable').querySelector('tbody').innerHTML = recon.dealers.map(d=>{
+    const parts = d.parts.length
+      ? d.parts.map(p=>`v${p.remedy_version}: <b class="${p.available<1?'bad':'ok'}">${p.available}</b>`).join(' · ')
+      : '<span class="mut">无库存</span>';
+    return `<tr>
+      <td>${esc(d.code)} · ${esc(d.name)}</td>
+      <td>${esc(d.country)}</td>
+      <td>${d.active?pill('营业中','ok'):pill('已停用','mut')}</td>
+      <td>${parts}</td>
+      <td>${d.open_todos}</td>
+      <td>${d.shortage_count?pill(d.shortage_count,'bad'):pill('0','ok')}</td>
+      <td class="mono" style="color:var(--bad)">${d.shortage_vins.length?d.shortage_vins.map(esc).join(', '):'—'}</td>
+      <td>${pill('v'+d.current_scope_version,'accent')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRecalcs(){
+  const rows = recon.recalculations.slice().reverse();
+  $('recalcTable').querySelector('tbody').innerHTML = rows.length ? rows.map(r=>{
+    const trig = {scope_changed:pill('范围调整','accent'),vehicle_transferred:pill('车辆转手','warn'),recall_published:pill('召回发布','ok'),vehicle_registered:pill('车辆登记','mut')}[r.trigger] || pill(r.trigger,'mut');
+    const vin = r.vehicle_id ? (recon.vehicles.find(v=>v.vin && v.vin.startsWith) ? esc(r.vehicle_id) : r.vehicle_id) : '—';
+    return `<tr>
+      <td class="mono mut">${esc(r.created_at)}</td>
+      <td>${trig}</td>
+      <td>${pill('v'+r.scope_version,'accent')}</td>
+      <td class="mono">${r.vehicle_id?('#'+r.vehicle_id):'—'}</td>
+      <td class="reason" title="${esc(r.reason)}">${esc(r.reason)}</td>
+      <td>${r.affected_count}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="mut">暂无重算记录</td></tr>';
+}
+
+function renderReports(){
+  $('reportTable').querySelector('tbody').innerHTML = recon.regulatory_reports.slice().reverse().map(r=>{
+    const p = JSON.parse(r.payload_json);
+    return `<tr>
+      <td>${pill('v'+r.scope_version,'accent')}</td>
+      <td>${p.affected_count}</td>
+      <td>${pill(r.status, r.status==='queued'?'warn':'ok')}</td>
+      <td class="mono mut">${esc(r.created_at)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" class="mut">暂无上报</td></tr>';
+}
+
+function renderScopes(){
+  $('scopeTable').querySelector('tbody').innerHTML = recon.scope_versions.slice().reverse().map(s=>{
+    const sc = JSON.parse(s.scope_json);
+    const desc = `${sc.models.join('/')} · ${sc.model_years.join('/')} · ${sc.vin_prefixes.join('/')} · ${sc.countries.join('/')}`;
+    return `<tr>
+      <td>${pill('v'+s.scope_version,'accent')}</td>
+      <td class="mono">${esc(desc)}</td>
+      <td class="mut">${esc(s.created_by)}</td>
+      <td class="mono mut">${esc(s.created_at)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" class="mut">暂无范围调整</td></tr>';
+}
+
+async function doChangeScope(){
+  const id = $('recallSelect').value; if(!id) return;
+  const recall = recon.recall;
+  const country = prompt('新增进入召回范围的国家（如 SG），留空取消：', 'SG');
+  if(!country) return;
+  const scope = {...recall.scope, countries: Array.from(new Set([...recall.scope.countries, country.toUpperCase()]))};
+  try{
+    await api(`/api/recalls/${id}/scope`, {method:'POST', headers:{'X-Actor':'maker-demo','X-Role':'manufacturer'}, body:JSON.stringify({scope, expected_version:recall.revision})});
+    toast('范围已调整，待办/通知/上报已重算'); await loadAll();
+  }catch(e){ toast('失败：'+e.message); }
+}
+
+async function doTransfer(){
+  const id = $('recallSelect').value;
+  const vin = prompt('要转手的车辆 VIN：', ''); if(!vin) return;
+  const country = prompt('转入国家（如 SG）：', 'SG'); if(!country) return;
+  const owner = prompt('新车主：', 'Wang') || 'Wang';
+  try{
+    await api(`/api/vehicles/${encodeURIComponent(vin)}/transfer`, {method:'POST', headers:{'X-Actor':'dealer-demo','X-Role':'dealer'}, body:JSON.stringify({country:country.toUpperCase(), owner_name:owner})});
+    toast('车辆已转手，受影响召回已重算'); await loadAll();
+  }catch(e){ toast('失败：'+e.message); }
+}
+
+async function doAddParts(){
+  const id = $('recallSelect').value; if(!id) return;
+  const recall = recon.recall;
+  const dealerId = prompt('网点 ID（见网点表第一列）：', '2'); if(!dealerId) return;
+  const qty = prompt('入库数量：', '5'); if(!qty) return;
+  try{
+    await api(`/api/recalls/${id}/parts`, {method:'POST', headers:{'X-Actor':'maker-demo','X-Role':'manufacturer'}, body:JSON.stringify({dealer_id:Number(dealerId), remedy_version:recall.remedy_version, quantity:Number(qty)})});
+    toast('备件已入库'); await loadAll();
+  }catch(e){ toast('失败：'+e.message); }
+}
+
+$('recallSelect').addEventListener('change', loadAll);
+loadState().catch(e=>toast('加载失败：'+e.message));
+</script>
+</body>
+</html>
